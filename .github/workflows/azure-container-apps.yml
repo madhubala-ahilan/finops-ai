@@ -1,0 +1,53 @@
+name: Build and Deploy Azure Container Apps
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+env:
+  BACKEND_IMAGE: finops-backend
+  FRONTEND_IMAGE: finops-frontend
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to ACR
+        run: az acr login --name ${{ secrets.ACR_NAME }}
+
+      - name: Build and push backend
+        run: |
+          docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.BACKEND_IMAGE }}:${{ github.sha }} ./backend
+          docker push ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+
+      - name: Build and push frontend
+        run: |
+          docker build --build-arg VITE_API_BASE_URL=${{ secrets.BACKEND_URL }} -t ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.FRONTEND_IMAGE }}:${{ github.sha }} ./frontend
+          docker push ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+
+      - name: Deploy backend Container App
+        run: |
+          az containerapp update \
+            --name ${{ secrets.BACKEND_CONTAINER_APP }} \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --image ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+
+      - name: Deploy frontend Container App
+        run: |
+          az containerapp update \
+            --name ${{ secrets.FRONTEND_CONTAINER_APP }} \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --image ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
